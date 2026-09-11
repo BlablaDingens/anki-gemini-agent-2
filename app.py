@@ -38,6 +38,10 @@ vocab_data, last_sync = load_data_from_nextcloud()
 if "anki_export_list" not in st.session_state:
     st.session_state.anki_export_list = []
 
+# Key-Tracker für das Audio-Widget zur Vermeidung von Resubmit-Loops
+if "audio_key" not in st.session_state:
+    st.session_state.audio_key = 0
+
 # ==========================================
 # SIDEBAR: EINSTELLUNGEN & MODI
 # ==========================================
@@ -137,9 +141,9 @@ if "active_chat" not in st.session_state:
 
 current_messages = st.session_state.chats[st.session_state.active_chat]
 
-# 🎙️ AUDIO-EINGABE BEI BEDARF
+# Dynamischer Key verhindert das wiederholte Senden derselben Sprachaufnahme
 with st.expander("🎙️ Türkisch sprechen (Spracheingabe & Aussprache-Analyse)", expanded=False):
-    audio_val = st.audio_input("Aufnahme starten")
+    audio_val = st.audio_input("Aufnahme starten", key=f"audio_input_{st.session_state.audio_key}")
 
 for idx, msg in enumerate(current_messages):
     with st.chat_message(msg["role"]):
@@ -158,18 +162,21 @@ for idx, msg in enumerate(current_messages):
                             st.toast(f"Gemerkt: {card['vorderseite']}")
                             st.rerun()
 
-# Text- oder Audio-Eingabe verarbeiten
 user_input = st.chat_input("Schreibe auf Türkisch...")
 
-if audio_val is not None and user_input is None:
-    # Audio-Stream verarbeiten
+# Prüfe, ob eine neue Audioaufnahme vorhanden ist
+has_audio = audio_val is not None
+if has_audio and not user_input:
     audio_bytes = audio_val.read()
-    user_input = "[Audio-Eingabe versendet]"
+    prompt_input = "[Audio-Eingabe versendet]"
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
-
-if user_input or audio_val:
+elif user_input:
     prompt_input = user_input
-    
+    has_audio = False
+else:
+    prompt_input = None
+
+if prompt_input:
     current_messages.append({"role": "user", "content": prompt_input})
     with st.chat_message("user"):
         st.markdown(prompt_input)
@@ -210,7 +217,7 @@ if user_input or audio_val:
             history_str = "\n".join([f"{m['role']}: {m['content']}" for m in current_messages[:-1]])
             
             contents_payload = [f"{history_str}\nuser: {prompt_input}"]
-            if audio_val is not None:
+            if has_audio:
                 contents_payload.append(audio_part)
 
             try:
@@ -228,7 +235,6 @@ if user_input or audio_val:
                 
                 output_md = ""
                 
-                # Audio-Erkennung & Feedback anzeigen
                 if res_data.get("recognized_audio_text"):
                     output_md += f"🎧 **Erkannter Text:** *\"{res_data['recognized_audio_text']}\"*\n\n"
                 
@@ -253,6 +259,11 @@ if user_input or audio_val:
                     "anki_suggestions": res_data.get("anki_card_suggestions", [])
                 }
                 current_messages.append(msg_object)
+
+                # WICHTIG: Erhöhe den Key des Audio-Widgets, damit die alte Sprachaufnahme sofort gelöscht wird!
+                if has_audio:
+                    st.session_state.audio_key += 1
+
                 st.rerun()
 
             except Exception as e:
