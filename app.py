@@ -28,7 +28,7 @@ def load_data_from_nextcloud():
             return res.json(), last_mod
     except Exception as e:
         pass
-    return [], "Keine Daten"     return res.json(), res.headers.get("Last-Modified", "Unbekannt")
+    return [], "Keine Daten"     
 
 vokabeln, last_sync = load_data_from_nextcloud()
 
