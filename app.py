@@ -4,6 +4,7 @@ from google.genai import types
 import requests
 import json
 import sync_anki
+import datetime
 
 st.set_page_config(page_title="Türkisch Agent", page_icon="🇹🇷", layout="wide")
 
@@ -14,12 +15,20 @@ APP_PASSWORD = "im6zt-2nPKS-zdD8b-jp6j7-oRAG5"
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def load_data_from_nextcloud():
     try:
         res = requests.get(WEBDAV_URL, auth=(USERNAME, APP_PASSWORD))
         if res.status_code == 200:
-            return res.json(), res.headers.get("Last-Modified", "Unbekannt")
+            # Versuche das Änderungsdatum aus dem Header zu lesen, sonst nimm die aktuelle Uhrzeit
+            last_mod = res.headers.get("Last-Modified")
+            if not last_mod:
+                now = datetime.datetime.now().strftime("%H:%M:%S (%d.%m.%Y)")
+                last_mod = f"Zuletzt abgerufen um {now}"
+            return res.json(), last_mod
+    except Exception as e:
+        pass
+    return [], "Keine Daten"     return res.json(), res.headers.get("Last-Modified", "Unbekannt")
     except Exception:
         pass
     return [], "Keine Daten"
