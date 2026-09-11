@@ -39,7 +39,7 @@ if "anki_export_list" not in st.session_state:
     st.session_state.anki_export_list = []
 
 # ==========================================
-# SIDEBAR: EINSTELLUNGEN, MODI & VOKABEL-ANZEIGE
+# SIDEBAR: EINSTELLUNGEN & MODI
 # ==========================================
 st.sidebar.title("🇹🇷 Agent Einstellungen")
 
@@ -52,7 +52,6 @@ if st.sidebar.button("🔄 Nextcloud Vokabeln neu laden"):
 st.sidebar.caption(f"Status: {last_sync}")
 st.sidebar.divider()
 
-# 1. SZENARIO & MODUS AUSWAHL
 st.sidebar.subheader("🎭 Szenario / Modus")
 scenario = st.sidebar.selectbox(
     "Wähle deine Lernsituation:",
@@ -66,7 +65,6 @@ scenario = st.sidebar.selectbox(
     ]
 )
 
-# 2. VOKABEL-FOKUS & SLIDER
 st.sidebar.divider()
 st.sidebar.subheader("🎯 Vokabel-Fokus")
 vocab_mode = st.sidebar.radio(
@@ -85,20 +83,14 @@ if "Zufallsmix" in vocab_mode and active_pool:
 max_vocab = st.sidebar.slider("Anzahl Anki-Vokabeln im Prompt:", 5, max(len(active_pool), 10) if active_pool else 50, min(30, len(active_pool)) if active_pool else 10)
 selected_vocab = active_pool[:max_vocab]
 
-# 📊 HIER IST WIEDER DIE VOKABEL-ÜBERSICHT
-with st.sidebar.expander("📊 Geladene Vokabeln (Tabelle)", expanded=True):
+with st.sidebar.expander("📊 Geladene Vokabeln (Tabelle)", expanded=False):
     stats = vocab_data.get("stats", {})
     st.write(f"Gesamt-Stapel in Anki: **{stats.get('total_in_deck', 0)}**")
-    st.write(f"Kürzlich gelernt/wiederholt: **{stats.get('total_recent', 0)}**")
-    st.write(f"Aktuell im Prompt aktiv: **{len(selected_vocab)}**")
-    st.divider()
+    st.write(f"Kürzlich gelernt: **{stats.get('total_recent', 0)}**")
+    st.write(f"Aktuell aktiv: **{len(selected_vocab)}**")
     if selected_vocab:
-        st.caption("Aktiv im Prompt geladene Karten:")
         st.dataframe(selected_vocab, use_container_width=True)
-    else:
-        st.warning("Keine Vokabeln verfügbar.")
 
-# 3. REVERSE-SYNC / ANKI EXPORT LISTE
 st.sidebar.divider()
 st.sidebar.subheader("📥 Neue Karten für Anki")
 
@@ -114,7 +106,6 @@ if st.session_state.anki_export_list:
         try:
             existing_res = requests.get(EXPORT_WEBDAV_URL, auth=(USERNAME, APP_PASSWORD))
             existing_data = existing_res.json() if existing_res.status_code == 200 else []
-            
             combined_data = existing_data + st.session_state.anki_export_list
             
             upload_res = requests.put(
@@ -135,7 +126,7 @@ else:
     st.sidebar.info("Noch keine neuen Vokabeln gemerkt.")
 
 # ==========================================
-# CHAT INTERFACE & PROMPT-BUILDER
+# CHAT INTERFACE & AUDIO-EINGABE
 # ==========================================
 st.title(f"🇹🇷 Sohbet: {scenario.split(' ')[1] if ' ' in scenario else scenario}")
 
@@ -146,13 +137,16 @@ if "active_chat" not in st.session_state:
 
 current_messages = st.session_state.chats[st.session_state.active_chat]
 
+# 🎙️ AUDIO-EINGABE BEI BEDARF
+with st.expander("🎙️ Türkisch sprechen (Spracheingabe & Aussprache-Analyse)", expanded=False):
+    audio_val = st.audio_input("Aufnahme starten")
+
 for idx, msg in enumerate(current_messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        
         if msg["role"] == "assistant" and "anki_suggestions" in msg:
             st.markdown("---")
-            st.caption("💡 **Vorgeschlagene Anki-Karten aus dieser Antwort:")
+            st.caption("💡 **Vorgeschlagene Anki-Karten:")
             cols = st.columns(len(msg["anki_suggestions"]))
             for c_idx, card in enumerate(msg["anki_suggestions"]):
                 with cols[c_idx]:
@@ -164,54 +158,65 @@ for idx, msg in enumerate(current_messages):
                             st.toast(f"Gemerkt: {card['vorderseite']}")
                             st.rerun()
 
-if user_input := st.chat_input("Schreibe auf Türkisch..."):
-    current_messages.append({"role": "user", "content": user_input})
+# Text- oder Audio-Eingabe verarbeiten
+user_input = st.chat_input("Schreibe auf Türkisch...")
+
+if audio_val is not None and user_input is None:
+    # Audio-Stream verarbeiten
+    audio_bytes = audio_val.read()
+    user_input = "[Audio-Eingabe versendet]"
+    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+
+if user_input or audio_val:
+    prompt_input = user_input
+    
+    current_messages.append({"role": "user", "content": prompt_input})
     with st.chat_message("user"):
-        st.markdown(user_input)
+        st.markdown(prompt_input)
 
     vocab_formatted = "\n".join([f"- {v['tr']} ({v['de']})" for v in selected_vocab])
 
     system_instruction = f"""
-    Du bist ein türkischer Muttersprachler und Sprachlehrer.
-    AKTUELLES SZENARIO / ROLLE: {scenario}
+    Du bist ein türkischer Muttersprachler, Sprachlehrer und Aussprache-Coach.
+    AKTUELLES SZENARIO: {scenario}
 
     AUFGABE:
     1. Antworte passend zum Szenario auf Türkisch.
     2. Wenn sinnvoll, baue Vokabeln aus dieser Liste ein:
     {vocab_formatted}
+    3. Falls eine Audio-Datei gesendet wurde: Transkribiere sie genau und gib unter "pronunciation_feedback" Feedback zu Aussprache, Betonung und Akzent!
 
-    FORMATIERUNG DEINER ANTWORT:
-    Gib deine Antwort IMMER im folgenden JSON-Format zurück:
+    FORMATIERUNG DEINER ANTWORT (STRENGES JSON):
     {{
+        "recognized_audio_text": "Exakter transkribierter Text der Audio-Datei auf Türkisch (oder null falls Text-Eingabe)",
+        "pronunciation_feedback": "Detailliertes Feedback zur Aussprache, Betonung, Rhythmus und Vokallängen auf Deutsch (oder null)",
         "reply_tr": "Deine Antwort auf Türkisch...",
         "translation_de": "Kurze deutsche Übersetzung deiner Antwort...",
         "suffix_analysis": [
-            {{"word": "geliyorum", "breakdown": "gel-iyor-um", "meaning": "kommen + Präsens + ich"}},
-            {{"word": "evlerinizden", "breakdown": "ev-ler-iniz-den", "meaning": "Haus + Plural + Euer + aus"}}
+            {{"word": "geliyorum", "breakdown": "gel-iyor-um", "meaning": "kommen + Präsens + ich"}}
         ],
         "cultural_notes_or_idioms": "Erklärung von Redewendungen/Kulturfloskeln falls vorhanden (sonst null)",
         "anki_card_suggestions": [
             {{
                 "vorderseite": "geliyorum (Grundform: gelmek)",
-                "rueckseite": "ich komme\\n\\nBeispiel: Şimdi eve geliyorum. (Ich komme jetzt nach Hause.)"
+                "rueckseite": "ich komme\\n\\nBeispiel: Şimdi eve geliyorum."
             }}
         ]
     }}
-
-    WICHTIG FÜR ANKI-KARTEN (anki_card_suggestions):
-    - Schlage 1-3 neue/nützliche Wörter oder Redewendungen aus deiner Antwort als Anki-Karte vor.
-    - Format Vorderseite: Nutze bei konjugierten Verben oder deklinierten Nomen IMMER das Format: 'VERWENDETE_FORM (Grundform: INFINITIV_ODER_NOMINATIV)'.
-    - Bei Redewendungen: Nimm die vollständige Redewendung auf die Vorderseite.
     """
 
     with st.chat_message("assistant"):
-        with st.spinner("Denkt nach und analysiert Suffixe..."):
-            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in current_messages])
+        with st.spinner("Analysiert Sprache und denkt nach..."):
+            history_str = "\n".join([f"{m['role']}: {m['content']}" for m in current_messages[:-1]])
             
+            contents_payload = [f"{history_str}\nuser: {prompt_input}"]
+            if audio_val is not None:
+                contents_payload.append(audio_part)
+
             try:
                 response = client.models.generate_content(
                     model="gemini-3.6-flash",
-                    contents=f"{history_str}\nuser: {user_input}",
+                    contents=contents_payload,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json",
@@ -221,7 +226,16 @@ if user_input := st.chat_input("Schreibe auf Türkisch..."):
                 
                 res_data = json.loads(response.text)
                 
-                output_md = f"{res_data.get('reply_tr', '')}\n\n*({res_data.get('translation_de', '')})*"
+                output_md = ""
+                
+                # Audio-Erkennung & Feedback anzeigen
+                if res_data.get("recognized_audio_text"):
+                    output_md += f"🎧 **Erkannter Text:** *\"{res_data['recognized_audio_text']}\"*\n\n"
+                
+                if res_data.get("pronunciation_feedback"):
+                    output_md += f"🗣️ **Aussprache-Feedback:**\n{res_data['pronunciation_feedback']}\n\n---\n"
+
+                output_md += f"{res_data.get('reply_tr', '')}\n\n*({res_data.get('translation_de', '')})*"
                 
                 if res_data.get("suffix_analysis"):
                     output_md += "\n\n---\n**🔬 Suffix-Analyse:**\n"
@@ -242,4 +256,4 @@ if user_input := st.chat_input("Schreibe auf Türkisch..."):
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Fehler bei der Antwortgenerierung: {e}")
+                st.error(f"Fehler bei der Audio-/Antwortgenerierung: {e}")
