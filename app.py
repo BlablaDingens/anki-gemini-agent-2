@@ -35,12 +35,11 @@ def load_data_from_nextcloud():
 
 vocab_data, last_sync = load_data_from_nextcloud()
 
-# Export-Liste im Session State initialisieren
 if "anki_export_list" not in st.session_state:
     st.session_state.anki_export_list = []
 
 # ==========================================
-# SIDEBAR: MODI, SZENARIEN & ANKI REVERSE SYNC
+# SIDEBAR: EINSTELLUNGEN, MODI & VOKABEL-ANZEIGE
 # ==========================================
 st.sidebar.title("🇹🇷 Agent Einstellungen")
 
@@ -67,7 +66,7 @@ scenario = st.sidebar.selectbox(
     ]
 )
 
-# 2. VOKABEL-FOKUS
+# 2. VOKABEL-FOKUS & SLIDER
 st.sidebar.divider()
 st.sidebar.subheader("🎯 Vokabel-Fokus")
 vocab_mode = st.sidebar.radio(
@@ -86,6 +85,19 @@ if "Zufallsmix" in vocab_mode and active_pool:
 max_vocab = st.sidebar.slider("Anzahl Anki-Vokabeln im Prompt:", 5, max(len(active_pool), 10) if active_pool else 50, min(30, len(active_pool)) if active_pool else 10)
 selected_vocab = active_pool[:max_vocab]
 
+# 📊 HIER IST WIEDER DIE VOKABEL-ÜBERSICHT
+with st.sidebar.expander("📊 Geladene Vokabeln (Tabelle)", expanded=True):
+    stats = vocab_data.get("stats", {})
+    st.write(f"Gesamt-Stapel in Anki: **{stats.get('total_in_deck', 0)}**")
+    st.write(f"Kürzlich gelernt/wiederholt: **{stats.get('total_recent', 0)}**")
+    st.write(f"Aktuell im Prompt aktiv: **{len(selected_vocab)}**")
+    st.divider()
+    if selected_vocab:
+        st.caption("Aktiv im Prompt geladene Karten:")
+        st.dataframe(selected_vocab, use_container_width=True)
+    else:
+        st.warning("Keine Vokabeln verfügbar.")
+
 # 3. REVERSE-SYNC / ANKI EXPORT LISTE
 st.sidebar.divider()
 st.sidebar.subheader("📥 Neue Karten für Anki")
@@ -100,7 +112,6 @@ if st.session_state.anki_export_list:
     
     if st.sidebar.button("🚀 In tubCloud für Anki-Import speichern"):
         try:
-            # Bestehende Exports aus Nextcloud laden (falls vorhanden)
             existing_res = requests.get(EXPORT_WEBDAV_URL, auth=(USERNAME, APP_PASSWORD))
             existing_data = existing_res.json() if existing_res.status_code == 200 else []
             
@@ -121,7 +132,7 @@ if st.session_state.anki_export_list:
         except Exception as e:
             st.sidebar.error(f"Verbindungsfehler: {e}")
 else:
-    st.sidebar.info("Noch keine neuen Vokabeln gemerkt. Klicke im Chat auf '➕ Für Anki merken'.")
+    st.sidebar.info("Noch keine neuen Vokabeln gemerkt.")
 
 # ==========================================
 # CHAT INTERFACE & PROMPT-BUILDER
@@ -139,7 +150,6 @@ for idx, msg in enumerate(current_messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         
-        # Zeige Anki-Export-Vorschläge bei Assistenten-Antworten an
         if msg["role"] == "assistant" and "anki_suggestions" in msg:
             st.markdown("---")
             st.caption("💡 **Vorgeschlagene Anki-Karten aus dieser Antwort:")
@@ -161,7 +171,6 @@ if user_input := st.chat_input("Schreibe auf Türkisch..."):
 
     vocab_formatted = "\n".join([f"- {v['tr']} ({v['de']})" for v in selected_vocab])
 
-    # STRUKTURIERTE SYSTEM-INSTRUCTION FÜR DIE KI
     system_instruction = f"""
     Du bist ein türkischer Muttersprachler und Sprachlehrer.
     AKTUELLES SZENARIO / ROLLE: {scenario}
@@ -172,7 +181,7 @@ if user_input := st.chat_input("Schreibe auf Türkisch..."):
     {vocab_formatted}
 
     FORMATIERUNG DEINER ANTWORT:
-    Gib deine Antwort IMMER im folgenden JSON-Format zurück (strenges JSON, kein Fliesstext ausserhalb des JSON):
+    Gib deine Antwort IMMER im folgenden JSON-Format zurück:
     {{
         "reply_tr": "Deine Antwort auf Türkisch...",
         "translation_de": "Kurze deutsche Übersetzung deiner Antwort...",
@@ -212,22 +221,18 @@ if user_input := st.chat_input("Schreibe auf Türkisch..."):
                 
                 res_data = json.loads(response.text)
                 
-                # HTML / Markdown Darstellung der Antwort
                 output_md = f"{res_data.get('reply_tr', '')}\n\n*({res_data.get('translation_de', '')})*"
                 
-                # Suffix-Analyse darstellen
                 if res_data.get("suffix_analysis"):
                     output_md += "\n\n---\n**🔬 Suffix-Analyse:**\n"
                     for item in res_data["suffix_analysis"]:
                         output_md += f"- **{item['word']}** (`{item['breakdown']}`): *{item['meaning']}*\n"
                 
-                # Kultur & Redewendungen
                 if res_data.get("cultural_notes_or_idioms"):
                     output_md += f"\n\n💡 **Kultur & Redewendung:**\n{res_data['cultural_notes_or_idioms']}\n"
 
                 st.markdown(output_md)
                 
-                # Speichere Nachricht inkl. Anki-Vorschlägen
                 msg_object = {
                     "role": "assistant",
                     "content": output_md,
