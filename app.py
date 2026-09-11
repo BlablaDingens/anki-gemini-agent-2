@@ -3,8 +3,8 @@ from google import genai
 from google.genai import types
 import requests
 import json
-import sync_anki
 import datetime
+import random
 
 st.set_page_config(page_title="Türkisch Agent", page_icon="🇹🇷", layout="wide")
 
@@ -20,51 +20,78 @@ def load_data_from_nextcloud():
     try:
         res = requests.get(WEBDAV_URL, auth=(USERNAME, APP_PASSWORD))
         if res.status_code == 200:
-            # Versuche das Änderungsdatum aus dem Header zu lesen, sonst nimm die aktuelle Uhrzeit
+            data = res.json()
             last_mod = res.headers.get("Last-Modified")
             if not last_mod:
                 now = datetime.datetime.now().strftime("%H:%M:%S (%d.%m.%Y)")
                 last_mod = f"Zuletzt abgerufen um {now}"
-            return res.json(), last_mod
-    except Exception as e:
+            
+            # Abwärtskompatibilität, falls noch alte Listenstruktur existiert
+            if isinstance(data, list):
+                return {"recent": data, "all": data, "stats": {"total_in_deck": len(data), "total_recent": len(data)}}, last_mod
+            return data, last_mod
+    except Exception:
         pass
-    return [], "Keine Daten"     
+    return {"recent": [], "all": [], "stats": {"total_in_deck": 0, "total_recent": 0}}, "Keine Daten"
 
-vokabeln, last_sync = load_data_from_nextcloud()
+vocab_data, last_sync = load_data_from_nextcloud()
 
 # ==========================================
-# SIDEBAR: SYNC, SYSTEM PROMPT & PARAMETER
+# SIDEBAR: EINSTELLUNGEN & MODUS-AUSWAHL
 # ==========================================
 st.sidebar.title("🇹🇷 Agent Einstellungen")
 
-# 1. Sync-Button (Lädt die Vokabeln aus der tubCloud neu)
+# 1. Reload Button
 if st.sidebar.button("🔄 Nextcloud Vokabeln neu laden"):
     st.cache_data.clear()
-    st.sidebar.success("Vokabeln aktualisiert!")
+    now_time = datetime.datetime.now().strftime("%H:%M:%S")
+    st.sidebar.success(f"Vokabeln um {now_time} Uhr neu geladen!")
     st.rerun()
 
-st.sidebar.caption(f"Zuletzt synchronisiert: {last_sync}")
+st.sidebar.caption(f"Status: {last_sync}")
 st.sidebar.divider()
 
-# 2. Vokabel-Anzahl begrenzen
-st.sidebar.subheader("⚙️ Vokabel-Einstellungen")
-max_vocab = st.sidebar.slider("Anzahl Vokabeln im Prompt", min_value=5, max_value=min(len(vokabeln), 100) if vokabeln else 50, value=30)
-selected_vocab = vokabeln[:max_vocab]
+# 2. Vokabel-Modus wählen
+st.sidebar.subheader("🎯 Vokabel-Fokus")
+vocab_mode = st.sidebar.radio(
+    "Welche Vokabeln soll der Bot nutzen?",
+    [
+        "🔥 Kürzlich gelernt / wiederholt",
+        "🎲 Zufallsmix aus ALLEN Karten (gesamter Stapel)"
+    ]
+)
+
+if "Kürzlich" in vocab_mode:
+    active_pool = vocab_data.get("recent", [])
+else:
+    active_pool = vocab_data.get("all", [])
+
+# Zufällige Durchmischung, falls "Alle Karten" gewählt ist
+if "Zufallsmix" in vocab_mode and active_pool:
+    active_pool = random.sample(active_pool, len(active_pool))
+
+max_vocab = st.sidebar.slider(
+    "Anzahl Vokabeln im Prompt:",
+    min_value=5,
+    max_value=max(len(active_pool), 10) if active_pool else 50,
+    value=min(30, len(active_pool)) if active_pool else 10
+)
+selected_vocab = active_pool[:max_vocab]
 
 # 3. System-Instruction / Prompt Anweisungen anpassen
 st.sidebar.divider()
-st.sidebar.subheader("📝 System-Anweisungen (Prompt)")
+st.sidebar.subheader("📝 System-Anweisungen")
 
 default_instruction = """Du bist ein türkischer Gesprächspartner und Sprachlehrer.
 - Antworte primär auf Türkisch im gewählten Tonfall.
-- Baue bevorzugt die angegebenen Vokabeln in das Gespräch ein.
+- Baue bevorzugt die angegebenen Vokabeln natürlich in das Gespräch ein.
 - Wenn Fehler auftreten, korrigiere sie kurz auf Deutsch am Ende deiner Antwort.
 - Beende deine Antwort immer mit einer offenen Frage auf Türkisch."""
 
 custom_instruction = st.sidebar.text_area(
     "Verhalten / Regeln des Bots anpassen:",
     value=default_instruction,
-    height=180
+    height=170
 )
 
 tone = st.sidebar.selectbox(
@@ -91,8 +118,10 @@ if st.sidebar.button("➕ Chat erstellen") and new_chat_name:
 st.session_state.active_chat = st.sidebar.radio("Ausgewählter Chat:", list(st.session_state.chats.keys()))
 
 with st.sidebar.expander("📊 Geladene Vokabeln", expanded=False):
-    st.write(f"Gesamt in Nextcloud: {len(vokabeln)}")
-    st.write(f"Im Prompt aktiv: {len(selected_vocab)}")
+    stats = vocab_data.get("stats", {})
+    st.write(f"Gesamt-Stapel in Anki: **{stats.get('total_in_deck', 0)}**")
+    st.write(f"Kürzlich gelernt: **{stats.get('total_recent', 0)}**")
+    st.write(f"Im Prompt aktiv: **{len(selected_vocab)}**")
     if selected_vocab:
         st.dataframe(selected_vocab)
 
@@ -119,7 +148,7 @@ if user_input := st.chat_input("Schreibe auf Türkisch oder frage nach Grammatik
     
     GEWÄHLTER TONFALL: {tone}
     
-    AKTUELLE VOKABELN AUS ANKI:
+    AKTUELLE VOKABELN AUS ANKI ({vocab_mode}):
     {vocab_formatted}
     """
 
