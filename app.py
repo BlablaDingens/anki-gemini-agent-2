@@ -8,11 +8,18 @@ import random
 
 st.set_page_config(page_title="Türkisch Agent Pro", page_icon="🇹🇷", layout="wide")
 
-GEMINI_API_KEY = "AQ.Ab8RN6IEUjYRk7-brzXFIjVKV3QHb8R5Q8x8kzsVqC3iHfbH9g"
-WEBDAV_URL = "https://tubcloud.tu-berlin.de/remote.php/dav/files/6c15e8e8-a12e-103c-98d9-7f3a285a3c9f/Anki/anki_vocab.json"
-EXPORT_WEBDAV_URL = "https://tubcloud.tu-berlin.de/remote.php/dav/files/6c15e8e8-a12e-103c-98d9-7f3a285a3c9f/Anki/anki_new_exports.json"
-USERNAME = "b.wolbring"
-APP_PASSWORD = "im6zt-2nPKS-zdD8b-jp6j7-oRAG5"
+import os
+
+# Zugangsdaten sicher aus Streamlit Secrets auslesen
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+WEBDAV_URL = st.secrets.get("WEBDAV_URL", "https://tubcloud.tu-berlin.de/remote.php/dav/files/6c15e8e8-a12e-103c-98d9-7f3a285a3c9f/Anki/anki_vocab.json")
+EXPORT_WEBDAV_URL = st.secrets.get("EXPORT_WEBDAV_URL", "https://tubcloud.tu-berlin.de/remote.php/dav/files/6c15e8e8-a12e-103c-98d9-7f3a285a3c9f/Anki/anki_new_exports.json")
+USERNAME = st.secrets.get("WEBDAV_USERNAME", "b.wolbring")
+APP_PASSWORD = st.secrets.get("WEBDAV_PASSWORD", "im6zt-2nPKS-zdD8b-jp6j7-oRAG5")
+
+if not GEMINI_API_KEY:
+    st.error("❌ Kein GEMINI_API_KEY gefunden! Bitte in den Streamlit Secrets eintragen.")
+    st.stop()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
