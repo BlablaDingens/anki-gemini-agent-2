@@ -1,0 +1,108 @@
+
+import streamlit as st
+from google import genai
+from google.genai import types
+import requests
+import json
+from datetime import datetime
+import os
+
+# ==========================================
+# CONFIG & INITIALISIERUNG
+# ==========================================
+st.set_page_config(page_title="Türkisch Agent", page_icon="🇹🇷", layout="wide")
+
+GEMINI_API_KEY = "DEIN_GEMINI_API_KEY"
+WEBDAV_URL = "https://tubcloud.tu-berlin.de/remote.php/dav/files/b.wolbring/anki_vocab.json"
+USERNAME = "b.wolbring"
+APP_PASSWORD = "DEIN_APP_PASSWORT"
+
+client = genai.Client(api_key=AQ.Ab8RN6IEUjYRk7-brzXFIjVKV3QHb8R5Q8x8kzsVqC3iHfbH9g)
+
+# Vokabeln & Metadaten aus Nextcloud laden
+@st.cache_data(ttl=60) # Cache für 1 Minute
+def load_data_from_nextcloud():
+    try:
+        res = requests.get(WEBDAV_URL, auth=(USERNAME, APP_PASSWORD))
+        if res.status_code == 200:
+            vocab = res.json()
+            # Datum aus HTTP-Header 'Last-Modified'
+            last_mod = res.headers.get("Last-Modified", "Unbekannt")
+            return vocab, last_mod
+    except Exception as e:
+        st.error(f"Fehler beim Laden aus Nextcloud: {e}")
+    return [], "Keine Daten"
+
+vokabeln, last_sync = load_data_from_nextcloud()
+
+# ==========================================
+# SIDEBAR & DASHBOARD
+# ==========================================
+st.sidebar.title("🇹🇷 Türkisch Agent")
+st.sidebar.metric(label="Zuletzt synchronisiert", value=last_sync)
+
+with st.sidebar.expander("📊 Vokabel-Dashboard", expanded=False):
+    st.write(f"**Anzahl Vokabeln:** {len(vokabeln)}")
+    if vokabeln:
+        st.dataframe(vokabeln, use_container_width=True)
+    else:
+        st.warning("Keine Vokabeln gefunden. Bitte führe das Sync-Skript auf dem Laptop aus.")
+
+# ==========================================
+# CHAT INTERFACE & META-EBENE
+# ==========================================
+st.title("Sohbet & Grammatik (Gespräch & Hilfe)")
+
+# Chat-Verlauf im Speicher halten
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Bisherigen Chat anzeigen
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# User-Eingabe
+if user_input := st.chat_input("Schreibe auf Türkisch oder stelle eine Fragen zur Grammatik..."):
+    # User-Nachricht im Chat anzeigen
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # Prompt aufbauen
+    vocab_formatted = "\n".join([f"- {v['tr']} ({v['de']})" for v in vokabeln])
+    
+    system_instruction = f"""
+    Du bist ein geduldiger Türkisch-Lehrer. Du erfüllst zwei Aufgaben:
+    
+    1. HAUPTAUFGABE (Gespräch): Wenn der Nutzer auf Türkisch schreibt oder ein normales Gespräch führt, antworte auf Türkisch.
+       - Nutze bevorzugt folgende Vokabeln:
+       {vocab_formatted}
+       - Antworte in einfacher Sprache und beende deine Nachricht mit einer offenen Frage auf Türkisch.
+       - Korrigiere Grammatik- oder Vokabelfehler kurz am Ende auf Deutsch.
+       
+    2. META-EBENE (Grammatik-Erklärungen): Wenn der Nutzer explizit nach Grammatik, Zeitformen, Satzbau oder Erklärungen fragt (z. B. auf Deutsch oder Türkisch):
+       - Erkläre die verwendete Grammatikform ausführlich auf Deutsch.
+       - Erkläre, WIE sie gebildet wird (Regeln, Suffixe/Endungen).
+       - Erkläre, WANN man sie verwendet.
+       - Gib 2-3 anschauliche Beispielsätze.
+    """
+
+    # Antwort generieren
+    with st.chat_message("assistant"):
+        with st.spinner("Gemini denkt nach..."):
+            # Bisherigen Verlauf mitsenden für Kontext
+            conversation_history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
+            
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=f"{conversation_history}\nuser: {user_input}",
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.7
+                )
+            )
+            
+            reply = response.text
+            st.markdown(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
