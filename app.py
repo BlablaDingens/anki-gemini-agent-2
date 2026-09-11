@@ -31,16 +31,11 @@ vokabeln, last_sync = load_data_from_nextcloud()
 # ==========================================
 st.sidebar.title("🇹🇷 Agent Einstellungen")
 
-# 1. Sync-Button
-if st.sidebar.button("🔄 Anki Vokabeln jetzt synchronisieren"):
-    with st.sidebar.spinner("Greife auf Anki zu..."):
-        success, msg = sync_anki.sync()
-        if success:
-            st.sidebar.success(msg)
-            st.cache_data.clear()
-            st.rerun()
-        else:
-            st.sidebar.error(f"Sync fehlgeschlagen: {msg}")
+# 1. Sync-Button (Lädt die Vokabeln aus der tubCloud neu)
+if st.sidebar.button("🔄 Nextcloud Vokabeln neu laden"):
+    st.cache_data.clear()
+    st.sidebar.success("Vokabeln aktualisiert!")
+    st.rerun()
 
 st.sidebar.caption(f"Zuletzt synchronisiert: {last_sync}")
 st.sidebar.divider()
